@@ -119,7 +119,9 @@ export const useBoardStore = create<BoardState>((set, get) => ({
   setLastSubmit: (lastSubmit) => set({ lastSubmit }),
 }));
 
-export function selectVisibleProps(state: BoardState): BoardProp[] {
+export function selectVisibleProps(
+  state: Pick<BoardState, "props" | "sport" | "status" | "query">,
+): BoardProp[] {
   const q = state.query.trim().toLowerCase();
   return Object.values(state.props)
     .filter((prop) => (state.sport === "ALL" ? true : prop.sport === state.sport))

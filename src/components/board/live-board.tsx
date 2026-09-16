@@ -12,14 +12,22 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { useMemo } from "react";
 import { useLiveFeed } from "@/hooks/use-live-feed";
 import { selectVisibleProps, useBoardStore } from "@/store/board-store";
 
 function BoardGrid() {
-  const visible = useBoardStore(selectVisibleProps);
+  const props = useBoardStore((s) => s.props);
+  const sport = useBoardStore((s) => s.sport);
+  const status = useBoardStore((s) => s.status);
+  const query = useBoardStore((s) => s.query);
   const connection = useBoardStore((s) => s.connection);
   const error = useBoardStore((s) => s.error);
-  const count = useBoardStore((s) => Object.keys(s.props).length);
+  const visible = useMemo(
+    () => selectVisibleProps({ props, sport, status, query }),
+    [props, sport, status, query],
+  );
+  const count = Object.keys(props).length;
 
   if (connection === "offline" && !count) {
     return (
