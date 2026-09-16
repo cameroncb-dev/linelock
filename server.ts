@@ -87,11 +87,20 @@ async function main() {
   });
 
   const wss = new WebSocketServer({
-    server,
-    path: "/ws",
+    noServer: true,
     perMessageDeflate: false,
     maxPayload: 16_384,
     clientTracking: true,
+  });
+
+  server.on("upgrade", (req, socket, head) => {
+    const pathname = parse(req.url ?? "/", true).pathname ?? "/";
+    if (pathname !== "/ws") {
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit("connection", ws, req);
+    });
   });
 
   wss.on("connection", (socket) => {

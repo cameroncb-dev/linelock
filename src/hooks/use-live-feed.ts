@@ -10,15 +10,12 @@ function wsUrl() {
 }
 
 export function useLiveFeed() {
-  const hydrate = useBoardStore((s) => s.hydrate);
-  const applyBatch = useBoardStore((s) => s.applyBatch);
-  const setConnection = useBoardStore((s) => s.setConnection);
-
   useEffect(() => {
     let cancelled = false;
     let socket: WebSocket | null = null;
     let attempts = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    const { hydrate, applyBatch, setConnection } = useBoardStore.getState();
 
     async function loadSnapshot() {
       setConnection("connecting");
@@ -77,5 +74,5 @@ export function useLiveFeed() {
       clearTimeout(timer);
       socket?.close();
     };
-  }, [applyBatch, hydrate, setConnection]);
+  }, []);
 }
