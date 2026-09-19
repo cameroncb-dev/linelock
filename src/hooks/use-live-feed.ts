@@ -1,13 +1,9 @@
 "use client";
 
 import { useEffect } from "react";
+import { apiUrl, liveSocketUrl } from "@/lib/backend";
 import { useBoardStore } from "@/store/board-store";
 import type { Snapshot, WsMessage } from "@/lib/types";
-
-function wsUrl() {
-  const proto = window.location.protocol === "https:" ? "wss" : "ws";
-  return `${proto}://${window.location.host}/ws`;
-}
 
 export function useLiveFeed() {
   useEffect(() => {
@@ -19,7 +15,7 @@ export function useLiveFeed() {
 
     async function loadSnapshot() {
       setConnection("connecting");
-      const res = await fetch("/api/props", { cache: "no-store" });
+      const res = await fetch(apiUrl("/api/props"), { cache: "no-store" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as Snapshot;
       if (cancelled) return;
@@ -29,7 +25,7 @@ export function useLiveFeed() {
     function connect() {
       if (cancelled) return;
       setConnection(attempts === 0 ? "connecting" : "reconnecting");
-      const ws = new WebSocket(wsUrl());
+      const ws = new WebSocket(liveSocketUrl());
       socket = ws;
 
       ws.onopen = () => {

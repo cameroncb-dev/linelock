@@ -9,6 +9,7 @@ import {
   MIN_SLIP_LEGS,
   type Entry,
 } from "@/lib/types";
+import { apiUrl } from "@/lib/backend";
 import { cn } from "@/lib/utils";
 import { useBoardStore } from "@/store/board-store";
 
@@ -25,7 +26,7 @@ export function SlipPanel({ className }: { className?: string }) {
   const canSubmit = slip.length >= MIN_SLIP_LEGS && slip.length <= MAX_SLIP_LEGS;
 
   async function submit() {
-    const res = await fetch("/api/entries", {
+    const res = await fetch(apiUrl("/api/entries"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ legs: slip }),
