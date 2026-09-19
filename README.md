@@ -37,7 +37,16 @@ Open [http://127.0.0.1:43147](http://127.0.0.1:43147).
 
 ## Stack
 
-Next.js 16 (App Router) · TypeScript · Tailwind · shadcn/ui · Zustand · `ws`
+Next.js 16 (App Router) · TypeScript · Tailwind · shadcn/ui · Zustand · Node HTTP + `ws`
+
+A Rails API + Action Cable backend is the next slice. The UI already talks to a typed JSON/WS contract so that swap does not require board changes.
+
+## Engineering decisions
+
+- **WebSocket feed:** `server.ts` serves Next.js, REST, and `/ws` on one port. The mock engine ticks ~every 900ms with line nudges and live-stat bumps. Slow clients are skipped when `bufferedAmount` is high instead of buffering forever. Cap of 32 sockets.
+- **Bounded tick history:** `RingBuffer` keeps at most 48 ticks per prop on the server and the client. Oldest samples drop. Memory stats are on `GET /api/health` and in the header.
+- **Zustand + stale lines:** Board state (props, slip, connection) lives in Zustand. Locking a pick stores `lockedLine`. If the feed moves the line, the slip flags drift and `POST /api/entries` returns 409 until you re-lock.
+- **HTTP API:** `GET /api/health`, `GET /api/props`, `GET /api/props/:id`, `GET|POST /api/entries`. Submit validates 2–6 unique legs and current lines.
 
 ## Demo data
 
