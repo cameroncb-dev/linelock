@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
@@ -22,23 +23,49 @@ export function SlipPanel({ className }: { className?: string }) {
   const lastSubmit = useBoardStore((s) => s.lastSubmit);
   const setLastSubmit = useBoardStore((s) => s.setLastSubmit);
 
+  const [submitting, setSubmitting] = useState(false);
+
   const multiplier = DEMO_MULTIPLIERS[slip.length];
-  const canSubmit = slip.length >= MIN_SLIP_LEGS && slip.length <= MAX_SLIP_LEGS;
+  const canSubmit =
+    !submitting && slip.length >= MIN_SLIP_LEGS && slip.length <= MAX_SLIP_LEGS;
 
   async function submit() {
-    const res = await fetch(apiUrl("/api/entries"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ legs: slip }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setLastSubmit(data.error ?? "Could not lock the slip.");
-      return;
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      const res = await fetch(apiUrl("/api/entries"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ legs: slip }),
+      });
+      const data = (await res.json().catch(() => null)) as
+        | { error?: string; entry?: Entry }
+        | null;
+      if (!res.ok) {
+        setLastSubmit({
+          ok: false,
+          message: data?.error ?? `Could not lock the slip (HTTP ${res.status}).`,
+        });
+        return;
+      }
+      if (!data?.entry) {
+        setLastSubmit({ ok: false, message: "The server accepted the slip but sent nothing back." });
+        return;
+      }
+      const entry = data.entry;
+      clearSlip();
+      setLastSubmit({
+        ok: true,
+        message: `Locked ${entry.id} · demo ${entry.multiplier}x · not a wager`,
+      });
+    } catch {
+      setLastSubmit({
+        ok: false,
+        message: "Could not reach the line server. Check that it is still running.",
+      });
+    } finally {
+      setSubmitting(false);
     }
-    const entry = data.entry as Entry;
-    setLastSubmit(`Locked ${entry.id} · demo ${entry.multiplier}x · not a wager`);
-    clearSlip();
   }
 
   return (
@@ -107,7 +134,15 @@ export function SlipPanel({ className }: { className?: string }) {
       <Separator />
       <div className="flex flex-col gap-2 p-4">
         {lastSubmit && (
-          <p className="text-xs text-live">{lastSubmit}</p>
+          <p
+            role="status"
+            className={cn(
+              "text-xs",
+              lastSubmit.ok ? "text-live" : "text-amber-300",
+            )}
+          >
+            {lastSubmit.message}
+          </p>
         )}
         <div className="flex items-center justify-between text-sm">
           <span className="text-muted-foreground">Demo multiplier</span>
@@ -116,7 +151,7 @@ export function SlipPanel({ className }: { className?: string }) {
           </span>
         </div>
         <Button className="h-10 w-full" disabled={!canSubmit} onClick={() => void submit()}>
-          Lock slip
+          {submitting ? "Locking…" : "Lock slip"}
         </Button>
         <p className="text-[11px] leading-snug text-muted-foreground">
           Simulated lines only. No real money, no PrizePicks odds, no sportsbook

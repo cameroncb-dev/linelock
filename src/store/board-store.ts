@@ -17,6 +17,8 @@ export type StatusFilter = "ALL" | "live" | "scheduled" | "final";
 
 export type BoardProp = Prop & { history: Tick[] };
 
+export type SubmitResult = { ok: boolean; message: string };
+
 type BoardState = {
   connection: ConnectionState;
   error: string | null;
@@ -27,7 +29,7 @@ type BoardState = {
   status: StatusFilter;
   query: string;
   slip: SlipLeg[];
-  lastSubmit: string | null;
+  lastSubmit: SubmitResult | null;
   setFilters: (patch: Partial<Pick<BoardState, "sport" | "status" | "query">>) => void;
   hydrate: (props: BoardProp[], seq: number, memory: MemoryStats) => void;
   applyBatch: (seq: number, updates: { prop: Prop; tick: Tick }[]) => void;
@@ -36,7 +38,7 @@ type BoardState = {
   removeLeg: (propId: string) => void;
   relockLeg: (prop: Prop) => void;
   clearSlip: () => void;
-  setLastSubmit: (message: string | null) => void;
+  setLastSubmit: (result: SubmitResult | null) => void;
 };
 
 function toBoardProp(prop: Prop, history: Tick[]): BoardProp {

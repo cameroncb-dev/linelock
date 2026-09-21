@@ -2,6 +2,7 @@
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useBoardStore, type SportFilter, type StatusFilter } from "@/store/board-store";
 
@@ -88,11 +89,12 @@ export function BoardHeader() {
               </Button>
             ))}
           </div>
-          <input
+          <Input
             value={query}
             onChange={(e) => setFilters({ query: e.target.value })}
             placeholder="Search player or team"
-            className="h-8 flex-1 rounded-lg border border-input bg-input/30 px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label="Search player or team"
+            className="h-8 flex-1"
           />
         </div>
 

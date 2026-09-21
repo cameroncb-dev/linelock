@@ -33,7 +33,13 @@ export function useLiveFeed() {
       };
 
       ws.onmessage = (event) => {
-        const msg = JSON.parse(String(event.data)) as WsMessage;
+        // One bad frame must not take down the handler for every frame after it.
+        let msg: WsMessage;
+        try {
+          msg = JSON.parse(String(event.data)) as WsMessage;
+        } catch {
+          return;
+        }
         if (msg.type === "hello") {
           hydrate(msg.props, msg.seq, msg.memory);
           setConnection("live");
