@@ -16,6 +16,7 @@ const servesOwnFeed = !process.env.NEXT_PUBLIC_API_ORIGIN;
 
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
+const handleUpgrade = app.getUpgradeHandler();
 
 async function main() {
   await app.prepare();
@@ -46,6 +47,8 @@ async function main() {
   server.on("upgrade", (req, socket, head) => {
     const pathname = parse(req.url ?? "/", true).pathname ?? "/";
     if (pathname !== "/ws") {
+      // Next owns its own upgrades (HMR); dropping them here leaks the socket.
+      void handleUpgrade(req, socket, head);
       return;
     }
     wss.handleUpgrade(req, socket, head, (ws) => {
