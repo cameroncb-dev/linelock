@@ -8,33 +8,29 @@ class LiveEngine
   MAX_TICKS = 48
   MAX_CLIENTS = 32
   MAX_ENTRIES = 100
-  TICK_MS = 0.9
+  TICK_SECONDS = Sim::TICK_SECONDS
   STREAM = "linelock_feed"
 
   def initialize
     @mutex = Mutex.new
+    @games = {}
     @props = {}
     @history = {}
+    @projections = {}
     @entries = []
     @seq = 0
     @entry_seq = 0
+    @final_ticks = 0
     @timer = nil
     reset_slate!
   end
 
   def reset_slate!
     @mutex.synchronize do
-      @props = {}
-      @history = {}
       @entries = []
       @seq = 0
       @entry_seq = 0
-      Slate.seed.each do |prop|
-        @props[prop["id"]] = prop
-        buf = RingBuffer.new(MAX_TICKS)
-        buf.push({ "t" => prop["updatedAt"], "line" => prop["line"], "liveStat" => prop["liveStat"] })
-        @history[prop["id"]] = buf
-      end
+      seed_board
     end
   end
 
@@ -43,12 +39,12 @@ class LiveEngine
       return if @timer
 
       @timer = Thread.new do
+        Thread.current.abort_on_exception = true
         loop do
-          sleep TICK_MS
+          sleep TICK_SECONDS
           tick!
         end
       end
-      @timer.abort_on_exception = true
     end
   end
 
@@ -60,7 +56,7 @@ class LiveEngine
   end
 
   def running?
-    !@timer.nil?
+    @mutex.synchronize { !@timer.nil? }
   end
 
   def health
@@ -110,44 +106,29 @@ class LiveEngine
     end
   end
 
+  # One simulated tick. Public so specs can drive the clock without waiting.
   def tick!
     batch = nil
     @mutex.synchronize do
-      ids = @props.keys
-      live_ids = ids.select { |id| @props[id]["gameStatus"] == "live" }
-      scheduled = ids.select { |id| @props[id]["gameStatus"] == "scheduled" }
-      pool = live_ids.any? ? live_ids : scheduled
-      return if pool.empty?
+      advance_clocks
 
       updates = []
-      n = 2 + rand(3)
-      n.times do
-        id = pool.sample
-        prop = @props[id]
-        next if prop.nil? || prop["gameStatus"] == "final"
-
-        if prop["gameStatus"] == "scheduled" && rand < 0.04
-          prop["gameStatus"] = "live"
-          prop["clock"] = "Q1 12:00"
-          prop["liveStat"] = 0
-        end
-
-        if prop["gameStatus"] == "live"
-          if rand < 0.55
-            prop["liveStat"] = bump_live_stat(prop)
-          else
-            prop["line"] = nudge_line(prop)
-          end
-          prop["clock"] = step_clock(prop["clock"])
-          prop["gameStatus"] = "final" if prop["clock"] == "Final"
-        elsif rand < 0.4
-          prop["line"] = nudge_line(prop)
-        end
+      @props.each_value do |prop|
+        game = @games[prop["gameId"]]
+        next if game.nil?
+        next unless advance_prop(prop, game)
 
         prop["updatedAt"] = Slate.now_ms
         tick = { "t" => prop["updatedAt"], "line" => prop["line"], "liveStat" => prop["liveStat"] }
-        @history[id].push(tick)
-        updates << { "id" => id, "prop" => prop.dup, "tick" => tick }
+        @history[prop["id"]].push(tick)
+        updates << { "id" => prop["id"], "prop" => prop.dup, "tick" => tick }
+      end
+
+      if restart_if_slate_is_over
+        updates = @props.values.map do |prop|
+          tick = { "t" => prop["updatedAt"], "line" => prop["line"], "liveStat" => prop["liveStat"] }
+          { "id" => prop["id"], "prop" => prop.dup, "tick" => tick }
+        end
       end
 
       next if updates.empty?
@@ -164,6 +145,107 @@ class LiveEngine
   end
 
   private
+
+  def seed_board
+    @games = {}
+    @props = {}
+    @history = {}
+    @projections = {}
+    @final_ticks = 0
+
+    Slate.games.each { |game| @games[game["id"]] = game }
+
+    Slate.seed.each do |seed|
+      game = @games[seed["gameId"]]
+      next if game.nil?
+
+      prop = seed.merge(
+        "gameStatus" => game["status"],
+        "clock" => Sim.clock_label(game["sport"], game["status"], game["elapsedSec"], game["startLabel"]),
+        "liveStat" => nil,
+        "updatedAt" => Slate.now_ms
+      )
+      unless game["status"] == "scheduled"
+        projected = Sim.project_final(prop["line"], prop["stat"])
+        @projections[prop["id"]] = projected
+        progress = Sim.game_progress(game["sport"], game["elapsedSec"])
+        prop["liveStat"] = Sim.opening_stat(projected, prop["stat"], progress)
+      end
+
+      @props[prop["id"]] = prop
+      buf = RingBuffer.new(MAX_TICKS)
+      buf.push({ "t" => prop["updatedAt"], "line" => prop["line"], "liveStat" => prop["liveStat"] })
+      @history[prop["id"]] = buf
+    end
+  end
+
+  def advance_clocks
+    @games.each_value do |game|
+      case game["status"]
+      when "scheduled"
+        game["startsInSec"] -= Sim::GAME_SECONDS_PER_TICK
+        tip_off(game) if game["startsInSec"] <= 0
+      when "live"
+        regulation = Sim.regulation_seconds(game["sport"])
+        game["elapsedSec"] = [ game["elapsedSec"] + Sim::GAME_SECONDS_PER_TICK, regulation ].min
+        game["status"] = "final" if game["elapsedSec"] >= regulation
+      end
+    end
+  end
+
+  def tip_off(game)
+    game["status"] = "live"
+    game["elapsedSec"] = 0
+    game["startsInSec"] = 0
+    @props.each_value do |prop|
+      next unless prop["gameId"] == game["id"]
+
+      @projections[prop["id"]] = Sim.project_final(prop["line"], prop["stat"])
+      prop["liveStat"] = 0
+    end
+  end
+
+  # Applies one tick to a prop. Returns whether anything a client can see changed.
+  def advance_prop(prop, game)
+    if game["status"] == "scheduled"
+      return false if rand >= Sim::PREGAME_LINE_NUDGE_CHANCE
+
+      prop["line"] = Sim.nudge_line(prop["line"], prop["openingLine"])
+      return true
+    end
+
+    return false if prop["gameStatus"] == "final"
+
+    projected = @projections[prop["id"]] || 0
+    progress = Sim.game_progress(game["sport"], game["elapsedSec"])
+    prop["liveStat"] = Sim.advance_stat(prop["liveStat"] || 0, projected, prop["stat"], progress)
+
+    if game["status"] == "final"
+      prop["liveStat"] = projected
+      prop["gameStatus"] = "final"
+      prop["clock"] = "Final"
+      return true
+    end
+
+    prop["gameStatus"] = "live"
+    prop["clock"] = Sim.clock_label(game["sport"], game["status"], game["elapsedSec"], game["startLabel"])
+    prop["line"] = Sim.nudge_line(prop["line"], prop["openingLine"]) if rand < Sim::LIVE_LINE_NUDGE_CHANCE
+    true
+  end
+
+  # Once every game is final the board would freeze, so reseed after a short hold.
+  def restart_if_slate_is_over
+    unless @games.each_value.all? { |game| game["status"] == "final" }
+      @final_ticks = 0
+      return false
+    end
+
+    @final_ticks += 1
+    return false if @final_ticks < Sim::RESTART_AFTER_TICKS
+
+    seed_board
+    true
+  end
 
   def snapshot_unlocked
     props = @props.values.map do |prop|
@@ -189,46 +271,5 @@ class LiveEngine
       "tickCount" => tick_count,
       "clientCap" => MAX_CLIENTS
     }
-  end
-
-  def nudge_line(prop)
-    delta = rand < 0.5 ? -0.5 : 0.5
-    toward_open = (prop["openingLine"] <=> prop["line"]) * 0.5
-    nxt = rand < 0.35 ? prop["line"] + toward_open : prop["line"] + delta
-    min = [0.5, prop["openingLine"] - 3].max
-    max = prop["openingLine"] + 3
-    [[nxt, max].min, min].max
-  end
-
-  def bump_live_stat(prop)
-    return prop["liveStat"] if prop["liveStat"].nil?
-
-    step = if %w[pass_yds rush_yds].include?(prop["stat"])
-             2 + rand(9)
-           else
-             rand < 0.55 ? 1 : 0
-           end
-    prop["liveStat"] + step
-  end
-
-  def step_clock(clock)
-    m = clock.match(/\AQ(\d) (\d+):(\d+)\z/)
-    return clock unless m
-
-    q = m[1].to_i
-    min = m[2].to_i
-    sec = m[3].to_i - 9
-    if sec.negative?
-      sec += 60
-      min -= 1
-    end
-    if min.negative?
-      q += 1
-      min = 11
-      sec = 59
-    end
-    return "Final" if q > 4
-
-    format("Q%d %d:%02d", q, min, sec)
   end
 end

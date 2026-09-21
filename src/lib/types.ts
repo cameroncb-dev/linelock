@@ -13,6 +13,8 @@ export type StatType =
 
 export type Prop = {
   id: string;
+  /** Props in the same game share one simulated clock. */
+  gameId: string;
   sport: Sport;
   player: string;
   team: string;

@@ -2,6 +2,20 @@ import { EventEmitter } from "node:events";
 import { validateEntry } from "../lib/entries";
 import { RingBuffer } from "../lib/ring-buffer";
 import {
+  GAME_SECONDS_PER_TICK,
+  LIVE_LINE_NUDGE_CHANCE,
+  PREGAME_LINE_NUDGE_CHANCE,
+  RESTART_AFTER_TICKS,
+  TICK_MS,
+  advanceStat,
+  clockLabel,
+  gameProgress,
+  nudgeLine,
+  openingStat,
+  projectFinal,
+  regulationSeconds,
+} from "../lib/sim";
+import {
   MAX_ENTRIES,
   MAX_TICKS_PER_PROP,
   MAX_WS_CLIENTS,
@@ -13,70 +27,26 @@ import {
   type Tick,
   type WsBatch,
 } from "../lib/types";
-import { seedSlate } from "./slate";
+import { seedGames, seedSlate, type GameSeed } from "./slate";
 
-const TICK_MS = 900;
-
-function cloneProp(prop: Prop): Prop {
-  return { ...prop };
-}
-
-function stepLiveClock(clock: string): string {
-  const m = clock.match(/^Q(\d) (\d+):(\d+)$/);
-  if (!m) return clock;
-  let q = Number(m[1]);
-  let min = Number(m[2]);
-  let sec = Number(m[3]) - 9;
-  if (sec < 0) {
-    sec += 60;
-    min -= 1;
-  }
-  if (min < 0) {
-    q += 1;
-    min = 11;
-    sec = 59;
-  }
-  if (q > 4) return "Final";
-  return `Q${q} ${min}:${String(sec).padStart(2, "0")}`;
-}
-
-function nudgeLine(prop: Prop): number {
-  const delta = Math.random() < 0.5 ? -0.5 : 0.5;
-  const towardOpen = Math.sign(prop.openingLine - prop.line) * 0.5;
-  const next = Math.random() < 0.35 ? prop.line + towardOpen : prop.line + delta;
-  const min = Math.max(0.5, prop.openingLine - 3);
-  const max = prop.openingLine + 3;
-  return Math.min(max, Math.max(min, next));
-}
-
-function bumpLiveStat(prop: Prop): number | null {
-  if (prop.liveStat == null) return prop.liveStat;
-  const step =
-    prop.stat === "pass_yds" || prop.stat === "rush_yds"
-      ? 2 + Math.floor(Math.random() * 9)
-      : Math.random() < 0.55
-        ? 1
-        : 0;
-  return prop.liveStat + step;
-}
+type GameState = GameSeed;
 
 export class LiveEngine extends EventEmitter {
+  private games = new Map<string, GameState>();
   private props = new Map<string, Prop>();
   private history = new Map<string, RingBuffer<Tick>>();
+  /** Each live prop's projected final total. Server-side only; never serialized. */
+  private projections = new Map<string, number>();
   private entries: Entry[] = [];
   private seq = 0;
   private timer: ReturnType<typeof setInterval> | null = null;
   private entrySeq = 0;
+  private finalTicks = 0;
 
   constructor() {
     super();
     this.setMaxListeners(64);
-    for (const prop of seedSlate()) {
-      this.props.set(prop.id, prop);
-      const buf = new RingBuffer<Tick>(MAX_TICKS_PER_PROP);
-      buf.push({ t: prop.updatedAt, line: prop.line, liveStat: prop.liveStat });
-      this.history.set(prop.id, buf);
-    }
+    this.seedBoard();
   }
 
   start(): void {
@@ -103,7 +73,7 @@ export class LiveEngine extends EventEmitter {
 
   snapshot(): Snapshot {
     const props = [...this.props.values()].map((prop) => ({
-      ...cloneProp(prop),
+      ...prop,
       history: this.history.get(prop.id)?.toArray() ?? [],
     }));
     return {
@@ -117,16 +87,14 @@ export class LiveEngine extends EventEmitter {
   getProp(id: string) {
     const prop = this.props.get(id);
     if (!prop) return null;
-    return {
-      ...cloneProp(prop),
-      history: this.history.get(id)?.toArray() ?? [],
-    };
+    return { ...prop, history: this.history.get(id)?.toArray() ?? [] };
   }
 
   health() {
     return {
       ok: true,
       product: "LineLock",
+      backend: "node",
       feed: this.timer ? "running" : "stopped",
       seq: this.seq,
       memory: this.memory(),
@@ -159,54 +127,148 @@ export class LiveEngine extends EventEmitter {
     this.on("batch", listener);
   }
 
-  private tick(): void {
-    const ids = [...this.props.keys()];
-    const liveIds = ids.filter((id) => this.props.get(id)?.gameStatus === "live");
-    const scheduled = ids.filter((id) => this.props.get(id)?.gameStatus === "scheduled");
-    const updates: WsBatch["updates"] = [];
-    const n = 2 + Math.floor(Math.random() * 3);
-    const pool = liveIds.length ? liveIds : scheduled;
-    if (!pool.length) return;
+  /** Reseeds the slate. Exposed for tests and for the end-of-slate restart. */
+  seedBoard(): void {
+    this.games.clear();
+    this.props.clear();
+    this.history.clear();
+    this.projections.clear();
+    this.finalTicks = 0;
 
-    for (let i = 0; i < n; i++) {
-      const id = pool[Math.floor(Math.random() * pool.length)];
-      const prop = this.props.get(id);
-      if (!prop || prop.gameStatus === "final") continue;
+    for (const game of seedGames()) this.games.set(game.id, { ...game });
 
-      if (prop.gameStatus === "scheduled" && Math.random() < 0.04) {
-        prop.gameStatus = "live";
-        prop.clock = "Q1 12:00";
-        prop.liveStat = 0;
-      }
-
-      if (prop.gameStatus === "live") {
-        if (Math.random() < 0.55) {
-          prop.liveStat = bumpLiveStat(prop);
-        } else {
-          prop.line = nudgeLine(prop);
-        }
-        prop.clock = stepLiveClock(prop.clock);
-        if (prop.clock === "Final") {
-          prop.gameStatus = "final";
-        }
-      } else if (Math.random() < 0.4) {
-        prop.line = nudgeLine(prop);
-      }
-
-      prop.updatedAt = Date.now();
-      const tick: Tick = {
-        t: prop.updatedAt,
-        line: prop.line,
-        liveStat: prop.liveStat,
+    for (const seed of seedSlate()) {
+      const game = this.games.get(seed.gameId);
+      if (!game) continue;
+      const prop: Prop = {
+        ...seed,
+        gameStatus: game.status,
+        clock: clockLabel(game.sport, game.status, game.elapsedSec, game.startLabel),
+        liveStat: null,
+        updatedAt: Date.now(),
       };
-      this.history.get(id)?.push(tick);
-      updates.push({ id, prop: cloneProp(prop), tick });
+      if (game.status !== "scheduled") {
+        const projected = projectFinal(prop.line, prop.stat, Math.random);
+        this.projections.set(prop.id, projected);
+        prop.liveStat = openingStat(
+          projected,
+          prop.stat,
+          gameProgress(game.sport, game.elapsedSec),
+          Math.random,
+        );
+      }
+      this.props.set(prop.id, prop);
+      const buf = new RingBuffer<Tick>(MAX_TICKS_PER_PROP);
+      buf.push({ t: prop.updatedAt, line: prop.line, liveStat: prop.liveStat });
+      this.history.set(prop.id, buf);
+    }
+  }
+
+  /** One simulated tick. Exposed so tests can drive the clock without waiting. */
+  tick(): WsBatch | null {
+    this.advanceClocks();
+
+    const updates: WsBatch["updates"] = [];
+    for (const prop of this.props.values()) {
+      const game = this.games.get(prop.gameId);
+      if (!game) continue;
+      if (!this.advanceProp(prop, game)) continue;
+      prop.updatedAt = Date.now();
+      const tick: Tick = { t: prop.updatedAt, line: prop.line, liveStat: prop.liveStat };
+      this.history.get(prop.id)?.push(tick);
+      updates.push({ id: prop.id, prop: { ...prop }, tick });
     }
 
-    if (!updates.length) return;
+    if (this.restartIfSlateIsOver()) {
+      return this.emitBatch(
+        [...this.props.values()].map((prop) => ({
+          id: prop.id,
+          prop: { ...prop },
+          tick: { t: prop.updatedAt, line: prop.line, liveStat: prop.liveStat },
+        })),
+      );
+    }
+
+    if (!updates.length) return null;
+    return this.emitBatch(updates);
+  }
+
+  private emitBatch(updates: WsBatch["updates"]): WsBatch {
     this.seq += 1;
     const batch: WsBatch = { type: "batch", seq: this.seq, updates };
     this.emit("batch", batch);
+    return batch;
+  }
+
+  private advanceClocks(): void {
+    for (const game of this.games.values()) {
+      if (game.status === "scheduled") {
+        game.startsInSec -= GAME_SECONDS_PER_TICK;
+        if (game.startsInSec <= 0) this.tipOff(game);
+      } else if (game.status === "live") {
+        const regulation = regulationSeconds(game.sport);
+        game.elapsedSec = Math.min(regulation, game.elapsedSec + GAME_SECONDS_PER_TICK);
+        if (game.elapsedSec >= regulation) game.status = "final";
+      }
+    }
+  }
+
+  private tipOff(game: GameState): void {
+    game.status = "live";
+    game.elapsedSec = 0;
+    game.startsInSec = 0;
+    for (const prop of this.props.values()) {
+      if (prop.gameId !== game.id) continue;
+      this.projections.set(prop.id, projectFinal(prop.line, prop.stat, Math.random));
+      prop.liveStat = 0;
+    }
+  }
+
+  /** Applies one tick to a prop. Returns whether anything a client can see changed. */
+  private advanceProp(prop: Prop, game: GameState): boolean {
+    if (game.status === "scheduled") {
+      if (Math.random() >= PREGAME_LINE_NUDGE_CHANCE) return false;
+      prop.line = nudgeLine(prop.line, prop.openingLine, Math.random);
+      return true;
+    }
+
+    if (prop.gameStatus === "final") return false;
+
+    const projected = this.projections.get(prop.id) ?? 0;
+    prop.liveStat = advanceStat(
+      prop.liveStat ?? 0,
+      projected,
+      prop.stat,
+      gameProgress(game.sport, game.elapsedSec),
+      Math.random,
+    );
+
+    if (game.status === "final") {
+      prop.liveStat = projected;
+      prop.gameStatus = "final";
+      prop.clock = "Final";
+      return true;
+    }
+
+    prop.gameStatus = "live";
+    prop.clock = clockLabel(game.sport, game.status, game.elapsedSec, game.startLabel);
+    if (Math.random() < LIVE_LINE_NUDGE_CHANCE) {
+      prop.line = nudgeLine(prop.line, prop.openingLine, Math.random);
+    }
+    return true;
+  }
+
+  /** Once every game is final the board would freeze, so reseed after a short hold. */
+  private restartIfSlateIsOver(): boolean {
+    const over = [...this.games.values()].every((game) => game.status === "final");
+    if (!over) {
+      this.finalTicks = 0;
+      return false;
+    }
+    this.finalTicks += 1;
+    if (this.finalTicks < RESTART_AFTER_TICKS) return false;
+    this.seedBoard();
+    return true;
   }
 }
 
