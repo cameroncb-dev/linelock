@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
+# Fan-out for the raw /ws clients. The client cap lives on LiveEngine, which is
+# the one place both transports read it from.
 class SocketHub
-  MAX_CLIENTS = 32
-
   @mutex = Mutex.new
   @clients = []
 

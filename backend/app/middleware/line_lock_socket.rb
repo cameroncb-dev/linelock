@@ -27,8 +27,12 @@ class LineLockSocket
     socket = HijackedSocket.new(env, io)
 
     if SocketHub.size >= LiveEngine::MAX_CLIENTS
+      # The driver has to be started before it can write the close frame, and
+      # the hijacked IO is ours to close now that nothing else will touch it.
+      socket.driver.start
       socket.driver.close(1013, "capacity")
-      return [-1, {}, []]
+      io.close
+      return [ -1, {}, [] ]
     end
 
     SocketHub.add(socket)
@@ -39,7 +43,7 @@ class LineLockSocket
     socket.driver.on(:close) { SocketHub.remove(socket) }
     socket.driver.start
     socket.listen
-    [-1, {}, []]
+    [ -1, {}, [] ]
   end
 
   class HijackedSocket
