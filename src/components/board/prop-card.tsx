@@ -28,8 +28,10 @@ export function PropCard({ prop }: { prop: BoardProp }) {
   const toggleLeg = useBoardStore((s) => s.toggleLeg);
   const leg = slip.find((item) => item.propId === prop.id);
   const drifted = Boolean(leg && leg.lockedLine !== prop.line);
+  // The bar is capped at the line; the label is not, so a stat that has already
+  // cleared its number reads as "112% of line" rather than a full bar at 100%.
   const livePct =
-    prop.liveStat == null ? null : Math.min(100, (prop.liveStat / Math.max(prop.line, 0.5)) * 100);
+    prop.liveStat == null ? null : (prop.liveStat / Math.max(prop.line, 0.5)) * 100;
 
   return (
     <Card className="border-0 bg-card/80 py-3 shadow-none ring-1 ring-white/8">
@@ -84,8 +86,11 @@ export function PropCard({ prop }: { prop: BoardProp }) {
             </div>
             <div className="h-1.5 overflow-hidden rounded-full bg-muted">
               <div
-                className="h-full rounded-full bg-live"
-                style={{ width: `${livePct}%` }}
+                className={cn(
+                  "h-full rounded-full",
+                  livePct >= 100 ? "bg-more" : "bg-live/70",
+                )}
+                style={{ width: `${Math.min(100, livePct)}%` }}
               />
             </div>
           </div>

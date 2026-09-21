@@ -39,6 +39,10 @@ Rails.application.configure do
   config.action_cable.disable_request_forgery_protection = true
   config.action_cable.allowed_request_origins = [ /.*/ ]
 
+  # The feed broadcasts about once a second; at :info Action Cable prints the
+  # whole payload every time and buries everything else in the log.
+  config.action_cable.logger = ActiveSupport::Logger.new($stdout).tap { |logger| logger.level = Logger::WARN }
+
   # Raise error when a before_action's only/except options reference missing actions.
   config.action_controller.raise_on_missing_callback_actions = true
 

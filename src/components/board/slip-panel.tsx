@@ -80,7 +80,7 @@ export function SlipPanel({ className }: { className?: string }) {
           Slip
         </div>
         <p className="text-xs text-muted-foreground">
-          {slip.length}/{MAX_SLIP_LEGS} picks · {MIN_SLIP_LEGS} min to lock
+          {slip.length} of {MAX_SLIP_LEGS} picks · {MIN_SLIP_LEGS} needed to lock
         </p>
       </div>
       <Separator />
