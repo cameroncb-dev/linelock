@@ -2,32 +2,43 @@
 
 module Api
   class EntriesController < ApplicationController
+    MAX_BODY_BYTES = 8_192
+
     def index
       render json: { entries: LiveEngine.instance.list_entries }
     end
 
     def create
-      legs = entry_legs
-      result = LiveEngine.instance.submit_entry(legs)
+      if request.content_length.to_i > MAX_BODY_BYTES
+        return render_error(:content_too_large, "Body must be under #{MAX_BODY_BYTES} bytes.")
+      end
+
+      body = parsed_body
+      return render_error(:bad_request, INVALID_JSON_ERROR) if body == :invalid
+
+      result = LiveEngine.instance.submit_entry(legs_in(body))
       if result[:ok]
         render json: result, status: :created
       else
-        body = result.except(:status)
-        render json: body, status: result[:status]
+        render json: result.except(:status), status: result[:status]
       end
     end
 
     private
 
-    def entry_legs
-      body = JSON.parse(request.raw_post.presence || "{}")
-      Array(body["legs"]).map do |leg|
-        {
-          "propId" => leg["propId"],
-          "side" => leg["side"],
-          "lockedLine" => leg["lockedLine"].to_f
-        }
-      end
+    def parsed_body
+      raw = request.raw_post
+      return {} if raw.blank?
+
+      JSON.parse(raw)
+    rescue JSON::ParserError
+      :invalid
+    end
+
+    def legs_in(body)
+      return [] unless body.is_a?(Hash) && body["legs"].is_a?(Array)
+
+      body["legs"]
     end
   end
 end

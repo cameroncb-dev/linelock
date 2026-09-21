@@ -13,11 +13,24 @@ export type EntryError =
 
 export type EntryOk = { ok: true; multiplier: number; legs: SlipLeg[] };
 
+export const LEG_SHAPE_ERROR = "Each pick needs a propId, a side and a numeric lockedLine.";
+
+function isLeg(value: unknown): value is SlipLeg {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const leg = value as Record<string, unknown>;
+  return typeof leg.propId === "string" && typeof leg.lockedLine === "number";
+}
+
+/**
+ * Validates a slip. Mirrored by backend/app/services/entry_validator.rb: both
+ * backends must return the same status and the same error text for the same
+ * body, malformed input included.
+ */
 export function validateEntry(
   body: EntryRequest,
   propsById: Map<string, Prop>,
 ): EntryOk | EntryError {
-  const legs = body.legs ?? [];
+  const legs = Array.isArray(body?.legs) ? body.legs : [];
   if (legs.length < MIN_SLIP_LEGS || legs.length > MAX_SLIP_LEGS) {
     return {
       ok: false,
@@ -30,6 +43,9 @@ export function validateEntry(
   const drifted: string[] = [];
 
   for (const leg of legs) {
+    if (!isLeg(leg)) {
+      return { ok: false, status: 400, error: LEG_SHAPE_ERROR };
+    }
     if (leg.side !== "more" && leg.side !== "less") {
       return { ok: false, status: 400, error: "Each pick must be more or less." };
     }

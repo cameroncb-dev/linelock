@@ -1,0 +1,61 @@
+{
+  "$comment": "POST /api/entries error cases. Both backends are tested against this file: src/server/api.test.ts drives the Node handler, backend/spec/requests/error_contract_spec.rb drives Rails. If the two ever diverge, one of them fails.",
+  "path": "/api/entries",
+  "method": "POST",
+  "cases": [
+    {
+      "name": "malformed JSON",
+      "body": "{oops",
+      "status": 400,
+      "error": "Body must be valid JSON."
+    },
+    {
+      "name": "empty slip",
+      "body": "{\"legs\":[]}",
+      "status": 400,
+      "error": "Slip needs 2–6 picks."
+    },
+    {
+      "name": "legs that are not objects",
+      "body": "{\"legs\":[null,null]}",
+      "status": 400,
+      "error": "Each pick needs a propId, a side and a numeric lockedLine."
+    },
+    {
+      "name": "lockedLine sent as a string",
+      "body": "{\"legs\":[{\"propId\":\"nba-luka-pts\",\"side\":\"more\",\"lockedLine\":\"28.5\"},{\"propId\":\"nba-tatum-pts\",\"side\":\"less\",\"lockedLine\":26.5}]}",
+      "status": 400,
+      "error": "Each pick needs a propId, a side and a numeric lockedLine."
+    },
+    {
+      "name": "side that is neither more nor less",
+      "body": "{\"legs\":[{\"propId\":\"nba-luka-pts\",\"side\":\"maybe\",\"lockedLine\":28.5},{\"propId\":\"nba-tatum-pts\",\"side\":\"less\",\"lockedLine\":26.5}]}",
+      "status": 400,
+      "error": "Each pick must be more or less."
+    },
+    {
+      "name": "the same prop twice",
+      "body": "{\"legs\":[{\"propId\":\"nba-luka-pts\",\"side\":\"more\",\"lockedLine\":28.5},{\"propId\":\"nba-luka-pts\",\"side\":\"less\",\"lockedLine\":28.5}]}",
+      "status": 400,
+      "error": "Duplicate player-stat on the same slip."
+    },
+    {
+      "name": "a prop that does not exist",
+      "body": "{\"legs\":[{\"propId\":\"nope\",\"side\":\"more\",\"lockedLine\":1.5},{\"propId\":\"nba-tatum-pts\",\"side\":\"less\",\"lockedLine\":26.5}]}",
+      "status": 400,
+      "error": "Unknown prop nope."
+    },
+    {
+      "name": "a game that already finished",
+      "body": "{\"legs\":[{\"propId\":\"nfl-jefferson-rec\",\"side\":\"more\",\"lockedLine\":7.5},{\"propId\":\"nba-tatum-pts\",\"side\":\"less\",\"lockedLine\":26.5}]}",
+      "status": 409,
+      "error": "Justin Jefferson is already final."
+    },
+    {
+      "name": "a body over the size cap",
+      "bodyBytes": 9000,
+      "status": 413,
+      "error": "Body must be under 8192 bytes."
+    }
+  ]
+}

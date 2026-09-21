@@ -3,6 +3,7 @@ import { parse } from "node:url";
 import next from "next";
 import { WebSocket, WebSocketServer } from "ws";
 import { MAX_WS_CLIENTS } from "./src/lib/types";
+import { handleApiRequest, sendError } from "./src/server/api";
 import { liveEngine } from "./src/server/live-engine";
 
 const port = Number(process.env.PORT ?? 43147);
@@ -10,78 +11,27 @@ const hostname = process.env.HOST ?? "0.0.0.0";
 const dev = process.env.NODE_ENV !== "production";
 const MAX_BUFFERED = 32_768;
 
+/** `npm run dev:rails-ui` points the UI at Rails, so this process must not also simulate. */
+const servesOwnFeed = !process.env.NEXT_PUBLIC_API_ORIGIN;
+
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
 
-function json(res: ServerResponse, status: number, body: unknown) {
-  res.writeHead(status, {
-    "Content-Type": "application/json; charset=utf-8",
-    "Cache-Control": "no-store",
-  });
-  res.end(JSON.stringify(body));
-}
-
-async function readJson(req: IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of req) {
-    size += chunk.length;
-    if (size > 8_192) throw new Error("payload too large");
-    chunks.push(chunk as Buffer);
-  }
-  if (!chunks.length) return {};
-  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-}
-
 async function main() {
   await app.prepare();
-  liveEngine.start();
+  if (servesOwnFeed) liveEngine.start();
 
-  const server = createServer((req, res) => {
+  const server = createServer((req: IncomingMessage, res: ServerResponse) => {
     const url = parse(req.url ?? "/", true);
     const pathname = url.pathname ?? "/";
 
     void (async () => {
       try {
-        if (req.method === "GET" && pathname === "/api/health") {
-          json(res, 200, liveEngine.health());
-          return;
-        }
-        if (req.method === "GET" && pathname === "/api/props") {
-          json(res, 200, liveEngine.snapshot());
-          return;
-        }
-        const one = pathname.match(/^\/api\/props\/([^/]+)$/);
-        if (req.method === "GET" && one) {
-          const prop = liveEngine.getProp(decodeURIComponent(one[1]));
-          if (!prop) {
-            json(res, 404, { error: "Prop not found" });
-            return;
-          }
-          json(res, 200, prop);
-          return;
-        }
-        if (req.method === "GET" && pathname === "/api/entries") {
-          json(res, 200, { entries: liveEngine.listEntries() });
-          return;
-        }
-        if (req.method === "POST" && pathname === "/api/entries") {
-          const body = (await readJson(req)) as { legs?: unknown };
-          const result = liveEngine.submitEntry({
-            legs: Array.isArray(body.legs) ? body.legs : [],
-          });
-          if (!result.ok) {
-            json(res, result.status, result);
-            return;
-          }
-          json(res, 201, result);
-          return;
-        }
-
+        if (await handleApiRequest(req, res, pathname, liveEngine)) return;
         await handle(req, res, url);
       } catch (error) {
         console.error(error);
-        if (!res.headersSent) json(res, 500, { error: "Internal error" });
+        if (!res.headersSent) sendError(res, 500, "Something went wrong on the server.");
       }
     })();
   });
@@ -124,7 +74,8 @@ async function main() {
   });
 
   server.listen(port, hostname, () => {
-    console.log(`LineLock listening on http://${hostname}:${port}`);
+    const feed = servesOwnFeed ? "own feed" : `UI only, API at ${process.env.NEXT_PUBLIC_API_ORIGIN}`;
+    console.log(`LineLock listening on http://${hostname}:${port} (${feed})`);
   });
 }
 

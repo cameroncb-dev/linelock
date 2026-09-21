@@ -11,7 +11,7 @@ module Api
       if prop
         render json: prop
       else
-        render json: { error: "Prop not found" }, status: :not_found
+        render_error(:not_found, "Prop not found.")
       end
     end
   end

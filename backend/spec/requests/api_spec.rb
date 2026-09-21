@@ -38,6 +38,7 @@ RSpec.describe "LineLock API", type: :request do
     it "404s unknown ids" do
       get "/api/props/nope"
       expect(response).to have_http_status(:not_found)
+      expect(response.parsed_body).to eq({ "ok" => false, "error" => "Prop not found." })
     end
   end
 
@@ -64,7 +65,7 @@ RSpec.describe "LineLock API", type: :request do
 
     it "rejects a short slip" do
       post "/api/entries",
-           params: { legs: [{ propId: "nba-jokic-pts", side: "more", lockedLine: 27.5 }] },
+           params: { legs: [ { propId: "nba-jokic-pts", side: "more", lockedLine: 27.5 } ] },
            as: :json
       expect(response).to have_http_status(:bad_request)
     end
@@ -80,6 +81,7 @@ RSpec.describe "LineLock API", type: :request do
            as: :json
       expect(response).to have_http_status(:conflict)
       expect(response.parsed_body["drifted"]).to include("nba-edwards-pts")
+      expect(response.parsed_body).not_to have_key("status")
     end
   end
 end
