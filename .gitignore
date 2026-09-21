@@ -37,13 +37,13 @@ yarn-error.log*
 # Rails
 /backend/log/*
 /backend/tmp/*
-/backend/storage/*
-/backend/db/*.sqlite3
-/backend/db/*.sqlite3-*
 /backend/config/master.key
 !/backend/log/.keep
 !/backend/tmp/.keep
-!/backend/storage/.keep
+
+# agent instruction files; `next dev` regenerates AGENTS.md on every run
+/AGENTS.md
+/CLAUDE.md
 
 # vercel
 .vercel
