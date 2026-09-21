@@ -16,7 +16,6 @@ const servesOwnFeed = !process.env.NEXT_PUBLIC_API_ORIGIN;
 
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
-const handleUpgrade = app.getUpgradeHandler();
 
 async function main() {
   await app.prepare();
@@ -46,14 +45,17 @@ async function main() {
 
   server.on("upgrade", (req, socket, head) => {
     const pathname = parse(req.url ?? "/", true).pathname ?? "/";
-    if (pathname !== "/ws") {
-      // Next owns its own upgrades (HMR); dropping them here leaks the socket.
-      void handleUpgrade(req, socket, head);
+    if (pathname === "/ws") {
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        wss.emit("connection", ws, req);
+      });
       return;
     }
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      wss.emit("connection", ws, req);
-    });
+    // Next adds its own upgrade listener for HMR the first time it renders a
+    // page, so /_next/* is already spoken for. Everything else belongs to
+    // nobody, and returning without closing leaks a socket per retry.
+    if (pathname.startsWith("/_next/")) return;
+    socket.destroy();
   });
 
   wss.on("connection", (socket) => {
