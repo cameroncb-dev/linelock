@@ -121,11 +121,16 @@ module Sim
     [ current + step, projected, stat_profile[:ceiling] ].min
   end
 
+  # Books post half points, so every line stays on that grid.
+  def round_to_half(value)
+    (value * 2).round / 2.0
+  end
+
   # How far a line may wander from where it opened. Scaled to the number, so a
   # 268.5 pass-yard line can move 15 yards while a 2.5 three-pointer line cannot
   # collapse to 0.5.
   def line_bound(opening_line)
-    clamp(opening_line * 0.12, 1, 15)
+    round_to_half(clamp(opening_line * 0.12, 1, 15))
   end
 
   # Half-point random walk with a pull back toward the opening number.
@@ -134,6 +139,6 @@ module Sim
     toward_open = (opening_line <=> line) * 0.5
     nxt = rand < 0.35 ? line + toward_open : line + drift
     bound = line_bound(opening_line)
-    clamp(nxt, [ 0.5, opening_line - bound ].max, opening_line + bound)
+    round_to_half(clamp(nxt, [ 0.5, opening_line - bound ].max, opening_line + bound))
   end
 end

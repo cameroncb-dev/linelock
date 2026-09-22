@@ -28,6 +28,7 @@ RSpec.describe LiveEngine do
       next unless (i % 10).zero?
 
       engine.snapshot["props"].each do |prop|
+        expect(prop["line"]).to eq(Sim.round_to_half(prop["line"]))
         next if prop["liveStat"].nil?
 
         ceiling = Sim::STAT_PROFILES[prop["stat"]][:ceiling]

@@ -9,6 +9,8 @@ import {
   elapsedAt,
   formatClock,
   gameProgress,
+  lineBound,
+  nudgeLine,
   projectFinal,
   regulationSeconds,
 } from "./sim";
@@ -57,6 +59,17 @@ test("a stat cannot outrun the game clock", () => {
     );
   }
   assert.equal(live, projected, "the projection should land by the buzzer");
+});
+
+test("a line always stays on the half-point grid", () => {
+  for (const opening of [2.5, 11.5, 28.5, 268.5]) {
+    let line = opening;
+    for (let i = 0; i < 300; i++) {
+      line = nudgeLine(line, opening, Math.random);
+      assert.equal(line, Math.round(line * 2) / 2, `off-grid line ${line}`);
+      assert.ok(Math.abs(line - opening) <= lineBound(opening));
+    }
+  }
 });
 
 test("a stat is still short of its line at halftime", () => {

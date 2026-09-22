@@ -61,5 +61,15 @@ RSpec.describe Sim do
       500.times { line = described_class.nudge_line(line, 2.5) }
       expect(line).to be_between(1.5, 3.5)
     end
+
+    it "always posts a half point" do
+      [ 2.5, 11.5, 28.5, 268.5 ].each do |opening|
+        line = opening
+        300.times do
+          line = described_class.nudge_line(line, opening)
+          expect(line).to eq(described_class.round_to_half(line))
+        end
+      end
+    end
   end
 end

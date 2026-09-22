@@ -1,5 +1,7 @@
 # LineLock
 
+[![CI](https://github.com/cameroncb-dev/linelock/actions/workflows/ci.yml/badge.svg)](https://github.com/cameroncb-dev/linelock/actions/workflows/ci.yml)
+
 Simulated **more/less player-prop board** with live line movement. PrizePicks-shaped intern portfolio: React board, JSON API, live feed, bounded tick memory. Not a sportsbook. No real money. No PrizePicks scraping.
 
 ![The LineLock board: live NBA and NFL player props with moving lines, tick sparklines and a three-pick slip](docs/board-desktop.png)

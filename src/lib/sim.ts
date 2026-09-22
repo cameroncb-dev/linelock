@@ -157,13 +157,18 @@ export function advanceStat(
   return Math.min(current + step, projected, profile.ceiling);
 }
 
+/** Books post half points, so every line stays on that grid. */
+export function roundToHalf(value: number): number {
+  return Math.round(value * 2) / 2;
+}
+
 /**
  * How far a line may wander from where it opened. Scaled to the number, so a
  * 268.5 pass-yard line can move 15 yards while a 2.5 three-pointer line cannot
  * collapse to 0.5.
  */
 export function lineBound(openingLine: number): number {
-  return clamp(openingLine * 0.12, 1, 15);
+  return roundToHalf(clamp(openingLine * 0.12, 1, 15));
 }
 
 /** Half-point random walk with a pull back toward the opening number. */
@@ -176,5 +181,5 @@ export function nudgeLine(
   const towardOpen = Math.sign(openingLine - line) * 0.5;
   const next = random() < 0.35 ? line + towardOpen : line + drift;
   const bound = lineBound(openingLine);
-  return clamp(next, Math.max(0.5, openingLine - bound), openingLine + bound);
+  return roundToHalf(clamp(next, Math.max(0.5, openingLine - bound), openingLine + bound));
 }

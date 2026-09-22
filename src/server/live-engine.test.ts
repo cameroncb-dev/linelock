@@ -47,6 +47,11 @@ test("stats stay realistic for a whole slate of games", () => {
   for (let i = 0; i < 2_100; i++) {
     engine.tick();
     for (const prop of engine.snapshot().props) {
+      assert.equal(
+        prop.line,
+        Math.round(prop.line * 2) / 2,
+        `${prop.id} posted an off-grid line of ${prop.line}`,
+      );
       if (prop.liveStat == null) continue;
       const ceiling = STAT_PROFILES[prop.stat].ceiling;
       assert.ok(
